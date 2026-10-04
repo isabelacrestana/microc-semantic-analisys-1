@@ -264,11 +264,12 @@ class Parser:
         name = self.expect(TokenKind.IDENTIFIER)
 
         if self.match(TokenKind.ASSIGN):
+            target = IdentifierExpr(name.lexeme, span=self._token_span(name))
             value = self.parse_expression()
             semicolon = self.expect(TokenKind.SEMICOLON)
 
             return Assignment(
-                name.lexeme,
+                target,
                 value,
                 span=self._span(start, semicolon),
             )
@@ -366,7 +367,7 @@ class Parser:
 
         value = None
 
-        if self.peek().kind != TokenKind.SEMICOLON:
+        if self.peek().kind in EXPRESSION_START:
             value = self.parse_expression()
 
         end = self.expect(TokenKind.SEMICOLON)
@@ -415,19 +416,14 @@ class Parser:
     # string_literals ::= STRING_LITERAL+
     def parse_string_literals(self) -> StringLiteral:
 
-        start = self.peek()
-
-        string_literal = start.lexeme[1:-1]
-
-        self.expect(TokenKind.STRING_LITERAL)
-
+        start = self.expect(TokenKind.STRING_LITERAL)
+        string_literal = str(start.value)
         end = start
 
         while self.check(TokenKind.STRING_LITERAL):
-            next_token = self.peek()
-            string_literal += next_token.lexeme[1:-1]
+            next_token = self.advance()
+            string_literal += str(next_token.value)
             end = next_token
-            self.advance()
 
         return StringLiteral(
             value=string_literal,
@@ -483,7 +479,7 @@ class Parser:
 
         left = self.parse_relational()
         
-        while self.check(TokenKind.EQUAL_EQUAL):
+        while self.check(TokenKind.EQUAL_EQUAL) or self.check(TokenKind.NOT_EQUAL):
             next_token = self.peek()
             operator = next_token.lexeme
             self.advance()
@@ -566,13 +562,17 @@ class Parser:
         if self.peek().kind in (TokenKind.LOGICAL_NOT, TokenKind.MINUS):
             start = self.peek()
             op_token = self.advance()
-
-            operand = self.parse_primary()
+            operator = (
+                UnaryOperator.NEGATE
+                if op_token.kind is TokenKind.MINUS
+                else UnaryOperator.NOT
+            )
+            operand = self.parse_unary()
 
             return UnaryExpr(
-                operator = op_token.lexeme,
-                operand=UnaryOperator(operand),
-                span=self._span(start, operand)
+                operator=operator,
+                operand=operand,
+                span=self._span(start, operand),
             )
 
         return self.parse_primary()
@@ -627,7 +627,7 @@ class Parser:
                 span=self._token_span(start)
             ) 
 
-        raise ParserError(self.peek(), {TokenKind.LEFT_PAREN, TokenKind.IDENTIFIER, TokenKind.INT_LITERAL, TokenKind.KW_TRUE, TokenKind.KW_FALSE}) 
+        raise ParserError(self.peek(), set(EXPRESSION_START)) 
     
 
     # arguments ::= (expression (COMMA expression)*)?
@@ -645,3 +645,4 @@ class Parser:
 
 
         return arguments
+

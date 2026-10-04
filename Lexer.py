@@ -6,12 +6,14 @@ from typing import Iterator
 
 
 class TokenKind(enum.Enum):
-    """Interface publicada na etapa do lexer; nomes e números são fixos."""
+    """Classe já implementada: nomes e números não devem ser alterados."""
 
     EOF = -1
+
     IDENTIFIER = 1
     INT_LITERAL = 2
     STRING_LITERAL = 3
+
     KW_INT = 10
     KW_BOOL = 11
     KW_VOID = 12
@@ -22,6 +24,7 @@ class TokenKind(enum.Enum):
     KW_WHILE = 17
     KW_RETURN = 18
     KW_PRINT = 19
+
     PLUS = 20
     MINUS = 21
     STAR = 22
@@ -37,6 +40,7 @@ class TokenKind(enum.Enum):
     LOGICAL_OR = 32
     LOGICAL_NOT = 33
     ASSIGN = 34
+
     LEFT_PAREN = 40
     RIGHT_PAREN = 41
     LEFT_BRACE = 42
@@ -161,15 +165,14 @@ class Lexer:
         initial_line = self.line
         initial_column = self.column
 
-        lexeme = ""
-        lexeme += self.source[self.position]
+        lexeme = self.source[self.position]
 
         self.position += 1
         self.column += 1
 
-        next_char = self.source[self.position] if self.position < self.length else 'EOF'
+        next_char = self.source[self.position] if self.position < self.length else ''
 
-        if next_char == "=":
+        if lexeme in ('<', '>', '=', '!') and next_char == "=":
             lexeme += next_char
 
             self.position += 1
@@ -179,7 +182,6 @@ class Lexer:
         else:
             kind = self.simple_tokens[lexeme]
 
-
         return Token(kind=kind, lexeme=lexeme, value=None, line=initial_line, column=initial_column)
 
 
@@ -188,23 +190,21 @@ class Lexer:
         initial_line = self.line
         initial_column = self.column
 
-        lexeme = ""
-        lexeme += self.source[self.position]
+        char = self.source[self.position]
 
         self.position += 1
         self.column += 1
 
-        next_char = self.source[self.position] if self.position < self.length else 'EOF'
+        next_char = self.source[self.position] if self.position < self.length else ''
 
-        if next_char == "&" or next_char== "|":
-            lexeme += next_char
-
+        if char == "&" and next_char == "&":
             self.position += 1
             self.column += 1
-
-            kind = self.dualoperands[lexeme]
-
-            return Token(kind=kind, lexeme=lexeme, value=None, line=initial_line, column=initial_column)
+            return Token(kind=TokenKind.LOGICAL_AND, lexeme="&&", value=None, line=initial_line, column=initial_column)
+        elif char == "|" and next_char == "|":
+            self.position += 1
+            self.column += 1
+            return Token(kind=TokenKind.LOGICAL_OR, lexeme="||", value=None, line=initial_line, column=initial_column)
 
         raise LexerError("Operador invalido!", initial_line, initial_column)
 
@@ -214,7 +214,12 @@ class Lexer:
         self.position += 1
         self.column += 1
 
-        while self.position < self.length and self.source[self.position] != '\n':
+        while self.position < self.length:
+            char = self.source[self.position]
+            if char == '\n' or char == '\r':
+                break
+            if not char.isascii():
+                raise LexerError(f"Caractere inválido: {char!r}", self.line, self.column)
             self.position += 1
             self.column += 1
 
@@ -230,17 +235,26 @@ class Lexer:
         while self.position < self.length:
 
             char = self.source[self.position]
-            next_char = self.source[self.position + 1] if self.position + 1 < self.length else 'EOF'
+            next_char = self.source[self.position + 1] if self.position + 1 < self.length else ''
 
             if char == '*' and next_char == '/':
                 self.position += 2
                 self.column += 2
                 return None
 
-            if char == '\n':
+            if not char.isascii():
+                raise LexerError(f"Caractere inválido: {char!r}", self.line, self.column)
+
+            if char == '\r':
                 self.line += 1
                 self.column = 1
-
+                self.position += 1
+                if self.position < self.length and self.source[self.position] == '\n':
+                    self.position += 1
+                continue
+            elif char == '\n':
+                self.line += 1
+                self.column = 1
             else:
                 self.column += 1
 
@@ -257,7 +271,7 @@ class Lexer:
         self.position += 1
         self.column += 1
 
-        next_char = self.source[self.position] if self.position < self.length else 'EOF'
+        next_char = self.source[self.position] if self.position < self.length else ''
 
         handler = self.transition_table['slash'].get(next_char, self.transition_table['slash']['default'])
 
@@ -272,17 +286,24 @@ class Lexer:
 
     def state_whitespace(self) -> None:
 
-        while self.position < self.length and self.source[self.position].isspace():
-
+        while self.position < self.length:
             char = self.source[self.position]
+            if char not in ' \t\r\n':
+                break
 
-            if char == '\n':
+            if char == '\r':
                 self.line += 1
                 self.column = 1
+                self.position += 1
+                if self.position < self.length and self.source[self.position] == '\n':
+                    self.position += 1
+            elif char == '\n':
+                self.line += 1
+                self.column = 1
+                self.position += 1
             else:
                 self.column += 1
-
-            self.position += 1 
+                self.position += 1
 
         return None
 
@@ -323,7 +344,7 @@ class Lexer:
                 )
 
             # 2. Quebra de linha não escapada no meio da string (erro léxico)
-            if char == '\n':
+            if char == '\n' or char == '\r':
                 raise LexerError("String não fechada", self.line, self.column)
 
             # 3. Tratamento da barra de escape (\)
@@ -358,6 +379,8 @@ class Lexer:
                 
             # 4. Qualquer outro caractere comum
             else:
+                if not char.isascii():
+                    raise LexerError(f"Caractere inválido: {char!r}", self.line, self.column)
                 value_chars.append(char)
                 self.position += 1
                 self.column += 1
@@ -372,7 +395,7 @@ class Lexer:
         initial_column = self.column
         digits = ""
 
-        while self.position < self.length and self.source[self.position].isdigit():
+        while self.position < self.length and self.source[self.position].isascii() and self.source[self.position].isdigit():
             
             digits += self.source[self.position]
 
@@ -422,9 +445,9 @@ class Lexer:
             # 1. Classifica o caractere para consultar a tabela
             if (char.isascii() and char.isalpha()) or char == '_':
                 key = 'alpha'
-            elif char.isdigit():
+            elif char.isascii() and char.isdigit():
                 key = 'digit'
-            elif char.isspace():
+            elif char in ' \t\r\n':
                 key = 'whitespace'
             else:
                 key = char
